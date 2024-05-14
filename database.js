@@ -347,8 +347,19 @@ const getDms = async (user_id) => {
     await Promise.all(promises);
     console.log(JSON.stringify(rooms));
 
+    const response = {rooms: rooms, dms: result.rows};
 
-    return rooms;
+    return response;
+}
+
+const getDmByRoomName = async (room_name) => {
+    const query = {
+        text: 'SELECT * FROM dms WHERE associated_room = $1',
+        values: [room_name],
+    };
+
+    const result = await pool.query(query).catch(err => console.error(err));
+    return result.rows[0];
 }
 
 const deleteDm = async (dm_id) => {
@@ -407,5 +418,5 @@ module.exports = {
     deleteDm,
     getDmById,
     createMessage,
-    getMessagesFromRoom
+    getMessagesFromRoom,
 };
