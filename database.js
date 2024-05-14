@@ -311,14 +311,15 @@ const getDm = async (dm_rec1, dm_rec2) => {
     return result.rows[0];
 
 }
-
+//USES ROOM ID!
 const getDmById = async (dm_id) => {
     const query = {
-        text: 'SELECT * FROM dms WHERE id = $1',
+        text: 'SELECT * FROM dms WHERE associated_room = $1',
         values: [dm_id],
     };
-
+    console.log("DM ID: " + dm_id);
     const result = await pool.query(query).catch(err => console.error(err));
+    console.log("DM BY ID: " + JSON.stringify(result.rows[0]));
     return result.rows[0];
 }
 
