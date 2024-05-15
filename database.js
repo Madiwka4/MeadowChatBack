@@ -203,11 +203,11 @@ const getAllUsers = async () => {
 
 // MESSAGE FUNCTIONS
 
-const createMessage = async (message_text, message_attachment, message_author, message_room) => {
+const createMessage = async (message_text, message_attachment, message_author, message_room, mode) => {
     const current_time = new Date().toISOString();
     const query = {
-        text: 'INSERT INTO messages(message_text, message_attachment, message_author, message_room, message_sent) VALUES($1, $2, $3, $4, $5)',
-        values: [message_text, message_attachment, message_author, message_room, current_time],
+        text: 'INSERT INTO messages(message_text, message_attachment, message_author, message_room, message_sent, message_socket_id) VALUES($1, $2, $3, $4, $5, $6)',
+        values: [message_text, message_attachment, message_author, message_room, current_time, mode],
     };
 
     const result = await pool.query(query).catch(err => console.error(err));
@@ -223,6 +223,27 @@ const getMessagesFromRoom = async (room_id, start, number) => {
     const result = await pool.query(query).catch(err => console.error(err));
 
     return result.rows;
+}
+
+const getLastMessageFromRoom = async (room_id) => {
+    const query = {
+        text: 'SELECT * FROM messages WHERE message_room = $1 ORDER BY message_sent DESC LIMIT 1',
+        values: [room_id],
+    };
+
+    const result = await pool.query(query).catch(err => console.error(err));
+
+    return result.rows[0];
+}
+
+const markRoomAsRead = async (room_id, user_id) => {
+    const query = {
+        text: 'UPDATE messages SET message_socket_id = 2 WHERE message_room = $1 AND message_author = $2',
+        values: [room_id, user_id],
+    };
+
+    const result = await pool.query(query).catch(err => console.error(err));
+    return result;
 }
 
 // MESSAGE FUNCTIONS END
@@ -419,4 +440,6 @@ module.exports = {
     getDmById,
     createMessage,
     getMessagesFromRoom,
+    getLastMessageFromRoom,
+    markRoomAsRead
 };

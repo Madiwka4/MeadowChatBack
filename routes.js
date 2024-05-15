@@ -1,7 +1,7 @@
 const express = require('express');
 const { getUser, getAllUsers, createUser, getRoom, createDm, createRoom, getDm, getDms, getRoomById, deleteDm, deleteRoom
 , getDmById, getMessagesFromRoom,
-getUserById
+getUserById, getLastMessageFromRoom
  } = require('./database');
 const router = express.Router();
 const jwt = require ('jsonwebtoken');
@@ -159,6 +159,11 @@ router.get('/dm', authenticate, async (req, res) => {
         return;
     }
     const dms = await getDms(user.id);
+    dms.rooms = await Promise.all(dms.rooms.map(async (room) => {
+        room.last_message = await getLastMessageFromRoom(room.id);
+        return room;
+    }));
+    console.log("Sent DM using get /dm: " + JSON.stringify(dms));
     res.send(dms);
 });
 
@@ -201,8 +206,11 @@ router.get('/messages/', authenticate, async (req, res) => {
     //change it to match the format of {message, id, author}
     messages = await Promise.all(messages.map(async msg => {
         const user = await getUserById(msg.message_author);
-        const date = new Date(msg.message_sent)
+        const date = new Date(msg.message_sent + 'Z')
+        console.log("Reading date: " + date + " " + msg.message_sent + 'Z')
         const idstamp = date.getTime();
+        console.log("ID: " + idstamp)
+        
         // console.log("Date: " + date + msg.message_sent)
         // console.log("ID: " + idstamp)
         return {

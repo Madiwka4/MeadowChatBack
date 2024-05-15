@@ -16,7 +16,9 @@
 //         description: "Code chat room"
 //     }
 // };
-const { getUser, getAllRooms, getDms, getDm, createMessage, getRoomById, getDmById } = require('./database');
+const { getUser, getAllRooms, getDms, getDm, createMessage, getRoomById, getDmById, getLastMessageFromRoom, getUserById
+    , markRoomAsRead
+ } = require('./database');
 const jwt = require('jsonwebtoken');
 const usersInRooms = {};
 const userSockets = {};
@@ -98,7 +100,7 @@ module.exports = function(io) {
             );
             console.log("Rooms: " + JSON.stringify(rooms));
             //check if each DM has the other user online
-            dmObjects.forEach(async(dm) => {
+            Promise.all(dmObjects.map(async(dm) => {
                 const otherUser = dm.dm_rec1 === user.id ? dm.dm_rec2 : dm.dm_rec1;
                 if (userSockets[otherUser]) {
                     rooms[mapIdToRoomKey[dm.associated_room]].online = true;
@@ -112,11 +114,34 @@ module.exports = function(io) {
                 else{
                     rooms[mapIdToRoomKey[dm.associated_room]].inchat = false;
                 }
+                const lastmsg= await getLastMessageFromRoom(dm.associated_room);
+                //map the lastMessage to the format (message, id, author)
+                const xuser = await getUserById(lastmsg.message_author);
+                const xdate = new Date(lastmsg.message_sent)
+                const xidstamp = xdate.getTime();
+                
+                const lastMessage = {
+                    message: lastmsg.message_text,
+                    id: xidstamp,
+                    author: xuser.username
+                }
+                console.log("Last message: " + JSON.stringify(lastmsg));
+                rooms[mapIdToRoomKey[dm.associated_room]].last_message = lastMessage;
+
+                if (lastmsg.message_socket_id == 1 && lastmsg.message_author != user.id){
+                    rooms[mapIdToRoomKey[dm.associated_room]].unread = true;
+                }
+                else{
+                    rooms[mapIdToRoomKey[dm.associated_room]].unread = false;
+                }
+
                 console.log("Users in room: " + JSON.stringify(usersInRooms));
                 console.log("User sockets: " + JSON.stringify(userSockets));
+                
+            })).then(() => {
+                console.log("sending dms: " + JSON.stringify(rooms));
+                socket.emit("dms", rooms);
             });
-            console.log("sending dms: " + JSON.stringify(rooms));
-            socket.emit("dms", rooms);
         });
 
         socket.on("join room", async(room) => {
@@ -141,6 +166,8 @@ module.exports = function(io) {
                     console.log("Other user online");
                     io.to(userSockets[otherUser]).emit("guest joined", roomName);
                 }
+                //mark room as read
+                markRoomAsRead(room, otherUser);
             }
             io.to(room).emit("user joined", user.username);
         });
@@ -171,14 +198,20 @@ module.exports = function(io) {
                 if (!userSockets[otherUser]) {
                     console.log(userSockets);
                     console.log("Other user not online");
+                    createMessage(msg.message, null, user.id, room.id, 1);
                 }
                 else{
                     console.log("Other user online");
+                    room.last_message = msg;
                     io.to(userSockets[otherUser]).emit("chat notiff", room);
+                    createMessage(msg.message, null, user.id, room.id, 2);
                 }
             }
+            else{
+                createMessage(msg.message, null, user.id, room.id, 0);
+            }
 
-            createMessage(msg.message, null, user.id, room.id);
+            
         });
 
         // socket.on("direct message", (data) => {
