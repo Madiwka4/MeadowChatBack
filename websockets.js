@@ -115,28 +115,31 @@ module.exports = function(io) {
                     rooms[mapIdToRoomKey[dm.associated_room]].inchat = false;
                 }
                 const lastmsg= await getLastMessageFromRoom(dm.associated_room);
+                if (lastmsg){
+                    const xuser = await getUserById(lastmsg.message_author);
+                    const xdate = new Date(lastmsg.message_sent)
+                    const xidstamp = xdate.getTime();
+                    
+                    const lastMessage = {
+                        message: lastmsg.message_text,
+                        id: xidstamp,
+                        author: xuser.username
+                    }
+                    console.log("Last message: " + JSON.stringify(lastmsg));
+                    rooms[mapIdToRoomKey[dm.associated_room]].last_message = lastMessage;
+
+                    if (lastmsg.message_socket_id == 1 && lastmsg.message_author != user.id){
+                        rooms[mapIdToRoomKey[dm.associated_room]].unread = true;
+                    }
+                    else{
+                        rooms[mapIdToRoomKey[dm.associated_room]].unread = false;
+                    }
+
+                    console.log("Users in room: " + JSON.stringify(usersInRooms));
+                    console.log("User sockets: " + JSON.stringify(userSockets));
+                }
                 //map the lastMessage to the format (message, id, author)
-                const xuser = await getUserById(lastmsg.message_author);
-                const xdate = new Date(lastmsg.message_sent)
-                const xidstamp = xdate.getTime();
                 
-                const lastMessage = {
-                    message: lastmsg.message_text,
-                    id: xidstamp,
-                    author: xuser.username
-                }
-                console.log("Last message: " + JSON.stringify(lastmsg));
-                rooms[mapIdToRoomKey[dm.associated_room]].last_message = lastMessage;
-
-                if (lastmsg.message_socket_id == 1 && lastmsg.message_author != user.id){
-                    rooms[mapIdToRoomKey[dm.associated_room]].unread = true;
-                }
-                else{
-                    rooms[mapIdToRoomKey[dm.associated_room]].unread = false;
-                }
-
-                console.log("Users in room: " + JSON.stringify(usersInRooms));
-                console.log("User sockets: " + JSON.stringify(userSockets));
                 
             })).then(() => {
                 console.log("sending dms: " + JSON.stringify(rooms));
