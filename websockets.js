@@ -138,6 +138,13 @@ module.exports = function(io) {
                     console.log("Users in room: " + JSON.stringify(usersInRooms));
                     console.log("User sockets: " + JSON.stringify(userSockets));
                 }
+                else{
+                    rooms[mapIdToRoomKey[dm.associated_room]].last_message = {
+                        message: "No messages",
+                        id: 0,
+                        authro: "System",
+                    }
+                }
                 //map the lastMessage to the format (message, id, author)
                 
                 

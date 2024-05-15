@@ -225,6 +225,17 @@ const getMessagesFromRoom = async (room_id, start, number) => {
     return result.rows;
 }
 
+const getMessageNumberFromRoom = async (room_id) => {
+    const query = {
+        text: 'SELECT COUNT(*) FROM messages WHERE message_room = $1',
+        values: [room_id],
+    };
+
+    const result = await pool.query(query).catch(err => console.error(err));
+
+    return result.rows[0].count;
+}
+
 const getLastMessageFromRoom = async (room_id) => {
     const query = {
         text: 'SELECT * FROM messages WHERE message_room = $1 ORDER BY message_sent DESC LIMIT 1',
@@ -428,6 +439,7 @@ module.exports = {
     updateUser,
     getAllUsers,
     initDb,
+    getMessageNumberFromRoom,
     getAllRooms,
     getRoom,
     createRoom,

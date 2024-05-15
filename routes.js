@@ -1,7 +1,7 @@
 const express = require('express');
 const { getUser, getAllUsers, createUser, getRoom, createDm, createRoom, getDm, getDms, getRoomById, deleteDm, deleteRoom
 , getDmById, getMessagesFromRoom,
-getUserById, getLastMessageFromRoom
+getUserById, getLastMessageFromRoom, getMessageNumberFromRoom,
  } = require('./database');
 const router = express.Router();
 const jwt = require ('jsonwebtoken');
@@ -161,10 +161,47 @@ router.get('/dm', authenticate, async (req, res) => {
     const dms = await getDms(user.id);
     dms.rooms = await Promise.all(dms.rooms.map(async (room) => {
         room.last_message = await getLastMessageFromRoom(room.id);
+        if (!room.last_message) {
+            room.last_message = {
+                message: "No messages",
+                author: "System",
+                id: 0
+            }
+        }
         return room;
     }));
     console.log("Sent DM using get /dm: " + JSON.stringify(dms));
     res.send(dms);
+});
+
+router.get('/dm/:id', authenticate, async (req, res) => {
+    const token = req.headers.authorization;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await getUser(decoded.username);
+    const roomId = req.params.id;
+    const room = await getRoom(roomId);
+    if (!room) {
+        res.status(404).send("Room not found");
+        return;
+    }
+    if (room.room_type === 0) {
+        res.status(400).send("Room is not a DM");
+        return;
+    }
+    const DM = await getDmById(roomId);
+    if (DM.dm_rec1 !== user.id && DM.dm_rec2 !== user.id) {
+        res.status(401).send("Unauthorized");
+        return;
+    }
+    room.last_message = await getLastMessageFromRoom(roomId);
+    if (!room.last_message) {
+        room.last_message = {
+            message: "No messages",
+            author: "System",
+            id: 0
+        }
+    }
+    res.send(room);
 });
 
 router.delete('/dm', authenticate, async (req, res) => {
@@ -203,6 +240,7 @@ router.get('/messages/', authenticate, async (req, res) => {
     console.log("End: " + end);
 
     let messages = await getMessagesFromRoom(roomId, start, end);
+    const messageNum = await getMessageNumberFromRoom(roomId);
     //change it to match the format of {message, id, author}
     messages = await Promise.all(messages.map(async msg => {
         const user = await getUserById(msg.message_author);
@@ -220,9 +258,13 @@ router.get('/messages/', authenticate, async (req, res) => {
         }
     }));
 
-
-    console.log("messages: " + JSON.stringify(messages));
-    res.send(messages);
+    const response = {
+        messages: messages, 
+        notAll: (parseInt(start) + parseInt(messages.length)) < parseInt(messageNum)
+    }
+    console.log(start + " " + messages.length + " " + messageNum + " " + (start + messages.length));
+    console.log((start + messages.length) < messageNum)
+    res.send(response);
 
 });
 
