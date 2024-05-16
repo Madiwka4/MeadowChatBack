@@ -188,6 +188,10 @@ module.exports = function(io) {
             const roomId = data.room;
             console.log("requested room: " + roomId)
             const room = await getRoomById(roomId);
+            if (!room) {
+                io.to(socket.id).emit("invalid room");
+                return;
+            }
             console.log("room: " + JSON.stringify(room));
             const msg = {
                 message: data.message.content,
