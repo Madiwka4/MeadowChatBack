@@ -1,6 +1,15 @@
 const express = require('express');
 const { getUser, getAllUsers, createUser, getRoom, createDm, createRoom, getDm, getDms, getRoomById, deleteDm, deleteRoom
-, getDmById, getMessagesFromRoom,
+, getDmById, getMessagesFromRoom, createGroupchat, getGroupchatsByUser, 
+    getGroupchat,
+    getGroupchatById,
+    getAllGroupchats,
+    addGroupchatMember,
+    getGroupchatMembers,
+    deleteGroupchat,
+    deleteGroupchatMember,
+    checkGroupchatMember,
+    getRoomsFromGroupchat,
 getUserById, getLastMessageFromRoom, getMessageNumberFromRoom,
  } = require('./database');
 const router = express.Router();
@@ -266,6 +275,198 @@ router.get('/messages/', authenticate, async (req, res) => {
     console.log((start + messages.length) < messageNum)
     res.send(response);
 
+});
+
+router.post('/group', authenticate, async (req, res) => {
+    const { name, description } = req.body;
+    const token = req.headers.authorization;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await getUser(decoded.username);
+    if (!user) {
+        res.status(404).send("User not found");
+        return;
+    }
+
+    //regex check the name to alphanumeric
+    const regex = /^[a-zA-Z0-9\s]+$/;
+
+    if (!regex.test(name) || name.length > 20) {
+        res.status(400).send("Group name must be alphanumeric and less than 20 characters");
+        return;
+    }
+
+    if (description.length > 100) {
+        res.status(400).send("Description must be less than 100 characters");
+        return;
+    }
+    //check if user has more than 5 groups
+
+    const groupchats = await getGroupchatsByUser(user.id);
+    if (groupchats.length >= 5) {
+        res.status(400).send("User has reached the maximum number of groups");
+        return;
+    }
+
+    //check if group with the same name already exists
+    const grouptest = await getGroupchat(name);
+    if (grouptest) {
+        res.status(400).send("Group name already exists");
+        return;
+    }
+
+    const group = await createGroupchat(name, description, user.id);
+    res.send(group);
+});
+
+//get all the groups the user is in or owns
+router.get('/group', authenticate, async (req, res) => {
+    const token = req.headers.authorization;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await getUser(decoded.username);
+    if (!user) {
+        res.status(404).send("User not found");
+        return;
+    }
+    const groupchats = await getGroupchatsByUser(user.id);
+    res.send(groupchats);
+});
+
+router.get('/group/:id', authenticate, async (req, res) => {
+    const groupId = req.params.id;
+    
+    const groupchat = await getGroupchatById(groupId);
+    if (!groupchat) {
+        res.status(404).send("Group not found");
+        return;
+    }
+
+    //make sure the user is a member of the group
+    const token = req.headers.authorization;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await getUser(decoded.username);
+    if (!user) {
+        res.status(404).send("User not found");
+        return;
+    }
+
+    const member = await checkGroupchatMember(groupId, user.id);
+    if (!member) {
+        res.status(401).send("Unauthorized");
+        return;
+    }
+    res.send(groupchat);
+});
+
+//endpoint to invite a list of users to a group
+router.post('/group/invite', authenticate, async (req, res) => {
+    const { groupId, users } = req.body;
+    console.log("Group id: " + groupId);
+    console.log("Users: " + users);
+    //check if group exists
+    const groupchat = await getGroupchatById(groupId);
+    if (!groupchat) {
+        res.status(404).send("Group not found");
+        return;
+    }
+
+    //check if the user is the owner of the group
+    const token = req.headers.authorization;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await getUser(decoded.username);
+    if (!user) {
+        res.status(404).send("User not found");
+        return;
+    }
+
+    if (groupchat.group_owner != user.id) {
+        res.status(401).send("Unauthorized");
+        return;
+    }
+
+    //check if the users exist
+    const usersExist = await Promise.all(users.map(async username => {
+        const user = await getUser(username);
+        return user;
+    }));
+
+    //filter out the users that do not exist
+    const usersFiltered = usersExist.filter(user => user);
+
+    //invite the users
+    await Promise.all(usersFiltered.map(async user => {
+        const member = await checkGroupchatMember(groupId, user.id);
+        if (!member) {
+            await addGroupchatMember(groupId, user.id);
+        }
+    }));
+
+    res.send("Invited users to group");
+});
+
+//endpoint to remove a user from a group
+
+router.delete('/group/remove', authenticate, async (req, res) => {
+    const { groupId, userId } = req.body;
+    //check if group exists
+    const groupchat = await getGroupchatById(groupId);
+    if (!groupchat) {
+        res.status(404).send("Group not found");
+        return;
+    }
+
+    //check if the user is the owner of the group
+    const token = req.headers.authorization;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await getUser(decoded.username);
+    if (!user) {
+        res.status(404).send("User not found");
+        return;
+    }
+
+    if (groupchat.group_owner != user.id) {
+        res.status(401).send("Unauthorized");
+        return;
+    }
+
+    //check if the user is a member of the group
+    const member = await checkGroupchatMember(groupId, userId);
+    if (!member) {
+        res.status(404).send("User not found in group");
+        return;
+    }
+
+    //remove user from group
+    await deleteGroupchatMember(groupId, userId);
+    res.send("User removed from group");
+});
+
+//endpoint to delete a group
+router.delete('/group', authenticate, async (req, res) => {
+    const groupId = req.query.id;
+    //check if group exists
+    const groupchat = await getGroupchatById(groupId);
+    if (!groupchat) {
+        res.status(404).send("Group not found");
+        return;
+    }
+
+    //check if the user is the owner of the group
+    const token = req.headers.authorization;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await getUser(decoded.username);
+    if (!user) {
+        res.status(404).send("User not found");
+        return;
+    }
+
+    if (groupchat.group_owner != user.id) {
+        res.status(401).send("Unauthorized");
+        return;
+    }
+
+    //delete group
+    await deleteGroupchat(groupId);
+    res.send("Group deleted");
 });
 
 module.exports = router;

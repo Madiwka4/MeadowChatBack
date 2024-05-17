@@ -159,12 +159,20 @@ module.exports = function(io) {
             if (!usersInRooms[room]) {
                 usersInRooms[room] = [];
             }
-            usersInRooms[room].push(socket.id);
             console.log("User joined room: " + room);
             //check if this is a DM
             const dm = await getDmById(room);
             const roomName = await getRoomById(room);
+
+            
+
             if (dm) {
+                //check if the user is allowed to join this DM
+                if (dm.dm_rec1 !== user.id && dm.dm_rec2 !== user.id) {
+                    console.log("User not allowed to join this DM");
+                    socket.emit("invalid room");
+                    return;
+                }
                 console.log("DM found: " + JSON.stringify(dm));
                 const otherUser = dm.dm_rec1 === user.id ? dm.dm_rec2 : dm.dm_rec1;
                 console.log("Other user: " + otherUser);
@@ -176,9 +184,14 @@ module.exports = function(io) {
                     console.log("Other user online");
                     io.to(userSockets[otherUser]).emit("guest joined", roomName);
                 }
+                //
+
                 //mark room as read
                 markRoomAsRead(room, otherUser);
             }
+            
+            usersInRooms[room].push(socket.id);
+            
             io.to(room).emit("user joined", user.username);
         });
 
@@ -193,6 +206,12 @@ module.exports = function(io) {
                 return;
             }
             console.log("room: " + JSON.stringify(room));
+
+            if (data.message.content.length > 255 || data.message.content.length < 1) {
+                io.to(socket.id).emit("invalid message");
+                return;
+            }
+
             const msg = {
                 message: data.message.content,
                 id: data.message.id,
@@ -226,6 +245,17 @@ module.exports = function(io) {
             }
 
             
+        });
+
+        socket.on("ping group", async (data) => {
+            console.log("ping group: " + data.room);
+            const room = await getRoomById(data.room);
+            if (!room) {
+                io.to(socket.id).emit("invalid room");
+                return;
+            }
+            console.log("room: " + JSON.stringify(room));
+            io.to(data.room).emit("ping group", room);
         });
 
         // socket.on("direct message", (data) => {

@@ -78,6 +78,7 @@ const initDb = async () => {
             AND    table_name   = 'dms'
         );
     `);
+    
 
     if (!dmsTableExists.rows[0].exists) {
         console.log("Table dms does not exist, creating it...");
@@ -91,6 +92,48 @@ const initDb = async () => {
         `);
     }
 
+    //check if "groupchats" table exists, if not, create it
+    const groupchatsTableExists = await pool.query(`
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables
+            WHERE table_schema = 'public'
+            AND table_name = 'groupchats'
+        );
+    `);
+
+    if (!groupchatsTableExists.rows[0].exists) {
+        console.log("Table groupchats does not exist, creating it...");
+        await pool.query(`
+            CREATE TABLE groupchats (
+                id SERIAL PRIMARY KEY,
+                groupchat_name VARCHAR(255),
+                groupchat_description VARCHAR(255),
+                groupchat_public BOOLEAN DEFAULT FALSE,
+                groupchat_creator INTEGER REFERENCES users(id),
+                groupchat_room INTEGER REFERENCES rooms(id)
+            );
+        `);
+    }
+
+    //check if "groupchat_members" table exists, if not, create it
+    const groupchatMembersTableExists = await pool.query(`
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables
+            WHERE table_schema = 'public'
+            AND table_name = 'groupchat_members'
+        );
+    `);
+
+    if (!groupchatMembersTableExists.rows[0].exists) {
+        console.log("Table groupchat_members does not exist, creating it...");
+        await pool.query(`
+            CREATE TABLE groupchat_members (
+                id SERIAL PRIMARY KEY,
+                groupchat_id INTEGER REFERENCES groupchats(id),
+                user_id INTEGER REFERENCES users(id)
+            );
+        `);
+    }
     
 
     //check if "users" table is empty, if so, create a default user
@@ -107,6 +150,7 @@ const initDb = async () => {
         await pool.query('INSERT INTO rooms(room_name, room_description) VALUES($1, $2)', ['General', 'General chat']);
         await pool.query('INSERT INTO rooms(room_name, room_description) VALUES($1, $2)', ['General 2', 'Code chat']);
     }
+    
 
 };
 
@@ -428,7 +472,166 @@ const deleteRoom = async (room_id) => {
 
 // ROOM FUNCTIONS END
 
+// GROUPCHAT FUNCTIONS
 
+const createGroupchat = async (groupchat_name, groupchat_description, groupchat_public, groupchat_creator) => {
+    const numberOfGroupchats = await pool.query('SELECT * FROM groupchats WHERE groupchat_creator = $1', [groupchat_creator]);
+    if (numberOfGroupchats.rows.length >= 5) {
+        throw new Error('You have reached the maximum number of groupchats');
+    }
+    const room_name = groupchat_creator + numberOfGroupchats.rows.length;
+    const room_description = 'Groupchat room for ' + groupchat_creator + ' ' + numberOfGroupchats.rows.length;
+
+    const pre_query ={
+        text: 'INSERT INTO rooms(room_name, room_description, room_public) VALUES($1, $2, $3) RETURNING *',
+        values: [room_name, room_description, false],
+    }
+
+    const room = await pool.query(pre_query).catch(err => console.error(err));
+
+    if (!room) {
+        throw new Error('Error creating room');
+    }
+
+    const groupchat_room = room.rows[0].id;
+
+    const query = {
+        text: 'INSERT INTO groupchats(groupchat_name, groupchat_description, groupchat_public, groupchat_creator, groupchat_room) VALUES($1, $2, $3, $4) RETURNING *',
+        values: [groupchat_name, groupchat_description, groupchat_public, groupchat_creator, groupchat_room],
+    };
+
+    const result = await pool.query(query).catch(err => console.error(err));
+    return result.rows[0];
+}
+
+const getGroupchat = async (groupchat_name) => {
+    const query = {
+        text: 'SELECT * FROM groupchats WHERE groupchat_name = $1',
+        values: [groupchat_name],
+    };
+
+    const result
+        = await pool.query(query)
+        .catch(err => console.error(err));
+
+    return result.rows[0];
+
+}
+
+const getGroupchatById = async (groupchat_id) => {
+    const query = {
+        text: 'SELECT * FROM groupchats WHERE id = $1',
+        values: [groupchat_id],
+    };
+
+    const result = await pool
+        .query(query)
+        .catch(err => console.error(err));
+
+    return result.rows[0];
+}
+
+const getAllGroupchats = async () => {
+    const query = {
+        text: 'SELECT * FROM groupchats',
+    };
+
+    const result = await
+        pool.query(query)
+        .catch(err => console.error(err));
+
+    var groupchats = {};
+    result.rows.forEach(row => {
+        groupchats[row.groupchat_name] = {
+            name: row.groupchat_name,
+            description: row.groupchat_description,
+            id: row.id,
+        };
+    });
+    return groupchats;
+
+}
+
+const addGroupchatMember = async (groupchat_id, user_id) => {
+    const query = {
+        text: 'INSERT INTO groupchat_members(groupchat_id, user_id) VALUES($1, $2)',
+        values: [groupchat_id, user_id],
+    };
+
+    const result = await pool.query(query).catch(err => console.error(err));
+    return result;
+}
+
+const getGroupchatMembers = async (groupchat_id) => {
+    const query = {
+        text: 'SELECT * FROM groupchat_members WHERE groupchat_id = $1',
+        values: [groupchat_id],
+    };
+
+    const result = await pool
+        .query(query)
+        .catch(err => console.error(err));
+
+    return result.rows;
+}
+
+const deleteGroupchat = async (groupchat_id) => {
+    const query = {
+        text: 'DELETE FROM groupchats WHERE id = $1',
+        values: [groupchat_id],
+    };
+
+    return await pool.query
+        (query)
+        .catch(err => console.error(err));
+
+}
+
+const deleteGroupchatMember = async (groupchat_id, user_id) => {
+    const query = {
+        text: 'DELETE FROM groupchat_members WHERE groupchat_id = $1 AND user_id = $2',
+        values: [groupchat_id, user_id],
+    };
+
+    return await pool.query
+        (query)
+        .catch(err => console.error(err));
+
+}
+
+const checkGroupchatMember = async (groupchat_id, user_id) => {
+    const query = {
+        text: 'SELECT * FROM groupchat_members WHERE groupchat_id = $1 AND user_id = $2',
+        values: [groupchat_id, user_id],
+    };
+
+    const result = await pool.query(query).catch(err => console.error(err));
+    return result.rows[0];
+}
+
+const getRoomsFromGroupchat = async (groupchat_id) => {
+    const query = {
+        text: 'SELECT * FROM rooms WHERE id = $1',
+        values: [groupchat_id],
+    };
+
+    const result = await pool.query(query).catch(err => console.error(err));
+
+    return result.rows;
+}
+
+const getGroupchatsByUser = async (user_id) => {
+    const query = {
+        text: 'SELECT * FROM groupchats WHERE groupchat_creator = $1',
+        values: [user_id],
+    };
+
+    const result = await pool.query(query).catch(err => console.error(err));
+    return result.rows;
+    
+}
+
+// GROUPCHAT FUNCTIONS END
 
 
 module.exports = {
@@ -453,5 +656,16 @@ module.exports = {
     createMessage,
     getMessagesFromRoom,
     getLastMessageFromRoom,
-    markRoomAsRead
+    markRoomAsRead,
+    createGroupchat,
+    getGroupchat,
+    getGroupchatById,
+    getAllGroupchats,
+    addGroupchatMember,
+    getGroupchatMembers,
+    deleteGroupchat,
+    deleteGroupchatMember,
+    checkGroupchatMember,
+    getRoomsFromGroupchat,
+    getGroupchatsByUser
 };
