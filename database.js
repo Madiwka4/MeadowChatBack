@@ -418,6 +418,7 @@ const getDms = async (user_id) => {
             name: recipient.username,
             description: room.room_description,
             id: room.id,
+            room_name: room.room_name,
         };
     });
     await Promise.all(promises);
@@ -479,7 +480,7 @@ const createGroupchat = async (groupchat_name, groupchat_description, groupchat_
     if (numberOfGroupchats.rows.length >= 5) {
         throw new Error('You have reached the maximum number of groupchats');
     }
-    const room_name = groupchat_creator + numberOfGroupchats.rows.length;
+    const room_name = groupchat_creator + "_" + numberOfGroupchats.rows.length;
     const room_description = 'Groupchat room for ' + groupchat_creator + ' ' + numberOfGroupchats.rows.length;
 
     const pre_query ={
@@ -496,7 +497,7 @@ const createGroupchat = async (groupchat_name, groupchat_description, groupchat_
     const groupchat_room = room.rows[0].id;
 
     const query = {
-        text: 'INSERT INTO groupchats(groupchat_name, groupchat_description, groupchat_public, groupchat_creator, groupchat_room) VALUES($1, $2, $3, $4) RETURNING *',
+        text: 'INSERT INTO groupchats(groupchat_name, groupchat_description, groupchat_public, groupchat_creator, groupchat_room) VALUES($1, $2, $3, $4, $5) RETURNING *',
         values: [groupchat_name, groupchat_description, groupchat_public, groupchat_creator, groupchat_room],
     };
 
@@ -531,6 +532,19 @@ const getGroupchatById = async (groupchat_id) => {
     return result.rows[0];
 }
 
+const getGroupchatByRoomId = async (room_id) => {
+    const query = {
+        text: 'SELECT * FROM groupchats WHERE groupchat_room = $1',
+        values: [room_id],
+    };
+
+    const result = await pool
+        .query(query)
+        .catch(err => console.error(err));
+
+    return result.rows[0];
+}
+
 const getAllGroupchats = async () => {
     const query = {
         text: 'SELECT * FROM groupchats',
@@ -553,6 +567,7 @@ const getAllGroupchats = async () => {
 }
 
 const addGroupchatMember = async (groupchat_id, user_id) => {
+    console.log("ADDING MEMBER: " + groupchat_id + " " + user_id)
     const query = {
         text: 'INSERT INTO groupchat_members(groupchat_id, user_id) VALUES($1, $2)',
         values: [groupchat_id, user_id],
@@ -564,7 +579,12 @@ const addGroupchatMember = async (groupchat_id, user_id) => {
 
 const getGroupchatMembers = async (groupchat_id) => {
     const query = {
-        text: 'SELECT * FROM groupchat_members WHERE groupchat_id = $1',
+        text: `
+        SELECT users.id, users.username
+        FROM groupchat_members 
+        INNER JOIN users ON groupchat_members.user_id = users.id 
+        WHERE groupchat_members.groupchat_id = $1
+        `,
         values: [groupchat_id],
     };
 
@@ -573,6 +593,23 @@ const getGroupchatMembers = async (groupchat_id) => {
         .catch(err => console.error(err));
 
     return result.rows;
+}
+
+const getMemberCount = async (groupchat_id) => {
+    const query = {
+        text: 'SELECT COUNT(*) FROM groupchat_members WHERE groupchat_id = $1',
+        values: [groupchat_id],
+    };
+
+    const result = await pool
+        .query(query)
+        .catch(err => console.error(err));
+
+    if (!result.rows[0]) {
+        return 0;
+    }
+
+    return result.rows[0].count;
 }
 
 const deleteGroupchat = async (groupchat_id) => {
@@ -611,24 +648,44 @@ const checkGroupchatMember = async (groupchat_id, user_id) => {
 
 const getRoomsFromGroupchat = async (groupchat_id) => {
     const query = {
-        text: 'SELECT * FROM rooms WHERE id = $1',
+        text: `
+            SELECT rooms.* 
+            FROM rooms 
+            INNER JOIN groupchats ON rooms.id = groupchats.groupchat_room 
+            WHERE groupchats.id = $1
+        `,
         values: [groupchat_id],
     };
 
     const result = await pool.query(query).catch(err => console.error(err));
 
-    return result.rows;
+    return result.rows[0];
 }
 
 const getGroupchatsByUser = async (user_id) => {
     const query = {
-        text: 'SELECT * FROM groupchats WHERE groupchat_creator = $1',
+        text: `
+            SELECT groupchats.* 
+            FROM groupchats 
+            JOIN groupchat_members ON groupchats.id = groupchat_members.groupchat_id 
+            WHERE groupchat_members.user_id = $1
+        `,
         values: [user_id],
     };
 
     const result = await pool.query(query).catch(err => console.error(err));
     return result.rows;
     
+}
+
+const updateGroupchat = async (groupchat_id, groupchat_name, groupchat_description) => {
+    const query = {
+        text: 'UPDATE groupchats SET groupchat_name = $1, groupchat_description = $2 WHERE groupchat_room = $3',
+        values: [groupchat_name, groupchat_description, groupchat_id],
+    };
+    console.log("UPDATING GROUPCHAT: " + groupchat_id + " " + groupchat_name + " " + groupchat_description)
+    const result = await pool.query(query).catch(err => console.error(err));
+    return result;
 }
 
 // GROUPCHAT FUNCTIONS END
@@ -667,5 +724,8 @@ module.exports = {
     deleteGroupchatMember,
     checkGroupchatMember,
     getRoomsFromGroupchat,
-    getGroupchatsByUser
+    getGroupchatsByUser,
+    getMemberCount,
+    getGroupchatByRoomId,
+    updateGroupchat
 };

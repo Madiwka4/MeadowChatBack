@@ -53,7 +53,6 @@ module.exports = function(io) {
 
         userSockets[user.id] = socket.id;
         console.log(userSockets);
-
         //check all DMs and see if the other user is online
 
         const tdms = await getDms(user.id);
@@ -75,7 +74,6 @@ module.exports = function(io) {
                 io.to(userSockets[otherUser]).emit("friend online", trooms[tmapIdToRoomKey[dm.associated_room]]);
             }
         });
-
 
         console.log("Connection established from user " + user.username + " with id " + user.id);
 
@@ -102,6 +100,7 @@ module.exports = function(io) {
             //check if each DM has the other user online
             Promise.all(dmObjects.map(async(dm) => {
                 const otherUser = dm.dm_rec1 === user.id ? dm.dm_rec2 : dm.dm_rec1;
+                rooms[mapIdToRoomKey[dm.associated_room]].other_user = otherUser;
                 if (userSockets[otherUser]) {
                     rooms[mapIdToRoomKey[dm.associated_room]].online = true;
                 }
@@ -189,8 +188,9 @@ module.exports = function(io) {
                 //mark room as read
                 markRoomAsRead(room, otherUser);
             }
-            
-            usersInRooms[room].push(socket.id);
+            //get username of the socket
+
+            usersInRooms[room].push(user.id);
             
             io.to(room).emit("user joined", user.username);
         });
@@ -216,11 +216,12 @@ module.exports = function(io) {
                 message: data.message.content,
                 id: data.message.id,
                 author: user.username,
+                status: 1
             };
             console.log(user)
             console.log(user.username)
             console.log("RECV MSG: " + msg.message + "author: " +  msg.author + " in room: " + room.room_name);
-            io.to(roomId).emit("chat message", msg);
+            
 
             //check if room is a DM
             const dm = await getDmById(roomId);
@@ -239,23 +240,49 @@ module.exports = function(io) {
                     io.to(userSockets[otherUser]).emit("chat notiff", room);
                     createMessage(msg.message, null, user.id, room.id, 2);
                 }
+
+                //check if other user is in the chat
+                if (usersInRooms[roomId] && usersInRooms[roomId].length > 1) {
+                    console.log("Other user in chat");
+                    msg.status = 2;
+                }
+                else{
+                    console.log("Other user not in chat");
+                    createMessage(msg.message, null, user.id, room.id, 0);
+                }
             }
             else{
                 createMessage(msg.message, null, user.id, room.id, 0);
             }
-
+            io.to(roomId).emit("chat message", msg);
             
         });
 
+        socket.on("ping group removed", async (data) => {
+            console.log("ping members: " + JSON.stringify(data));
+            const socketToPing = userSockets[data];
+            if (socketToPing) {
+                io.to(socketToPing).emit("ping group removed");
+            }
+        });
+
+        socket.on("ping group added", async (data) => {
+            console.log("ping members: " + JSON.stringify(data));
+            const socketToPing = userSockets[data];
+            if (socketToPing) {
+                io.to(socketToPing).emit("ping group added");
+            }
+        });
+
         socket.on("ping group", async (data) => {
-            console.log("ping group: " + data.room);
-            const room = await getRoomById(data.room);
+            console.log("ping room: " + JSON.stringify(data));
+            const room = await getRoomById(data);
             if (!room) {
                 io.to(socket.id).emit("invalid room");
                 return;
             }
             console.log("room: " + JSON.stringify(room));
-            io.to(data.room).emit("ping group", room);
+            socket.to(data).emit("ping group");
         });
 
         // socket.on("direct message", (data) => {
@@ -269,7 +296,7 @@ module.exports = function(io) {
             if (!usersInRooms[roomName]) {
                 return;
             }
-            usersInRooms[roomName] = usersInRooms[roomName].filter(id => id !== socket.id);
+            usersInRooms[roomName] = usersInRooms[roomName].filter(id => id !== user.id);
 
             const dm = await getDmById(roomName);
             const roomObject = await getRoomById(roomName);
@@ -294,7 +321,7 @@ module.exports = function(io) {
             console.log("Connection lost")
             //erase user from usersInRooms
             Object.keys(usersInRooms).forEach(room => {
-                usersInRooms[room] = usersInRooms[room].filter(id => id !== socket.id);
+                usersInRooms[room] = usersInRooms[room].filter(id => id !== user.id);
             });
                 const tdms = await getDms(user.id);
                 const trooms = tdms.rooms;

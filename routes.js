@@ -9,6 +9,9 @@ const { getUser, getAllUsers, createUser, getRoom, createDm, createRoom, getDm, 
     deleteGroupchat,
     deleteGroupchatMember,
     checkGroupchatMember,
+    getGroupchatByRoomId,
+    getMemberCount,
+    updateGroupchat,
     getRoomsFromGroupchat,
 getUserById, getLastMessageFromRoom, getMessageNumberFromRoom,
  } = require('./database');
@@ -69,7 +72,12 @@ router.post('/login', async (req, res) => {
         return;
     }
     const token = jwt.sign({ username }, process.env.JWT_SECRET, { expiresIn: '12h' });
-    res.send(token);
+    const userToSend = {
+        username: user.username,
+        userid: user.id,
+        token: token
+    }
+    res.send(userToSend);
 });
 
 router.post('/register', async (req, res) => {
@@ -263,7 +271,8 @@ router.get('/messages/', authenticate, async (req, res) => {
         return {
             message: msg.message_text,
             id: idstamp,
-            author: user.username
+            author: user.username,
+            status: msg.message_socket_id
         }
     }));
 
@@ -314,12 +323,15 @@ router.post('/group', authenticate, async (req, res) => {
         return;
     }
 
-    const group = await createGroupchat(name, description, user.id);
+    const group = await createGroupchat(name, description, false, user.id);
+
+    const result = await addGroupchatMember(group.id, user.id);
     res.send(group);
 });
 
 //get all the groups the user is in or owns
 router.get('/group', authenticate, async (req, res) => {
+    console.log("GET GROUPS")
     const token = req.headers.authorization;
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await getUser(decoded.username);
@@ -328,7 +340,18 @@ router.get('/group', authenticate, async (req, res) => {
         return;
     }
     const groupchats = await getGroupchatsByUser(user.id);
-    res.send(groupchats);
+    console.log("!!!! GROUPCHARTS: " + JSON.stringify(groupchats));
+    //find the rooms associated with the groupchats
+    let promises = groupchats.map(async groupchat => {
+        groupchat.room = await getRoomsFromGroupchat(groupchat.id);
+        groupchat.members = await getGroupchatMembers(groupchat.id);
+        groupchat.owner = groupchat.groupchat_creator;
+        return groupchat;
+    });
+
+    const ans = await Promise.all(promises);
+    console.log("Groupchats: " + JSON.stringify(ans));
+    res.send(ans);
 });
 
 router.get('/group/:id', authenticate, async (req, res) => {
@@ -359,11 +382,14 @@ router.get('/group/:id', authenticate, async (req, res) => {
 
 //endpoint to invite a list of users to a group
 router.post('/group/invite', authenticate, async (req, res) => {
-    const { groupId, users } = req.body;
+    console.log(req.body)
+    const groupId = req.body.room;
+    const invitee = req.body.member;
     console.log("Group id: " + groupId);
-    console.log("Users: " + users);
+    console.log("User: " + invitee);
     //check if group exists
-    const groupchat = await getGroupchatById(groupId);
+    const groupchat = await getGroupchatByRoomId(groupId);
+    console.log("Groupchat: " + JSON.stringify(groupchat));
     if (!groupchat) {
         res.status(404).send("Group not found");
         return;
@@ -378,37 +404,52 @@ router.post('/group/invite', authenticate, async (req, res) => {
         return;
     }
 
-    if (groupchat.group_owner != user.id) {
+    if (groupchat.groupchat_creator != user.id) {
+        console.log(groupchat.groupchat_creator + " " + user.id)
         res.status(401).send("Unauthorized");
         return;
     }
 
-    //check if the users exist
-    const usersExist = await Promise.all(users.map(async username => {
-        const user = await getUser(username);
-        return user;
-    }));
+    //check if the invitee exists
+    const inviteeUser = await getUserById(invitee);
+    console.log("Invitee: " + JSON.stringify(inviteeUser));
+    if (!inviteeUser) {
+        res.status(404).send("Invitee not found");
+        return;
+    }
 
-    //filter out the users that do not exist
-    const usersFiltered = usersExist.filter(user => user);
+    //check if the invitee is already a member of the group
+    const member = await checkGroupchatMember(groupchat.id, invitee);
+    if (member) {
+        res.status(400).send("Invitee is already a member of the group");
+        return;
+    }
 
-    //invite the users
-    await Promise.all(usersFiltered.map(async user => {
-        const member = await checkGroupchatMember(groupId, user.id);
-        if (!member) {
-            await addGroupchatMember(groupId, user.id);
-        }
-    }));
+    //check if the user is trying to invite themselves
+    if (invitee === user.id) {
+        res.status(400).send("Cannot invite yourself");
+        return;
+    }
+    
 
-    res.send("Invited users to group");
+    //add the invitee to the group
+    const result = await addGroupchatMember(groupchat.id, invitee).catch(err => {
+        res.status(500).send("Error adding invitee to group");
+        return;
+    });
+    res.status(200).send("Invite sent");
+
+
 });
 
 //endpoint to remove a user from a group
 
 router.delete('/group/remove', authenticate, async (req, res) => {
-    const { groupId, userId } = req.body;
+    const groupId = req.query.room;
+    const userId = req.query.member;
+    console.log("Group id: " + groupId);
     //check if group exists
-    const groupchat = await getGroupchatById(groupId);
+    const groupchat = await getGroupchatByRoomId(groupId);
     if (!groupchat) {
         res.status(404).send("Group not found");
         return;
@@ -423,20 +464,20 @@ router.delete('/group/remove', authenticate, async (req, res) => {
         return;
     }
 
-    if (groupchat.group_owner != user.id) {
+    if (groupchat.groupchat_creator != user.id) {
         res.status(401).send("Unauthorized");
         return;
     }
 
     //check if the user is a member of the group
-    const member = await checkGroupchatMember(groupId, userId);
+    const member = await checkGroupchatMember(groupchat.id, userId);
     if (!member) {
         res.status(404).send("User not found in group");
         return;
     }
 
     //remove user from group
-    await deleteGroupchatMember(groupId, userId);
+    await deleteGroupchatMember(groupchat.id, userId);
     res.send("User removed from group");
 });
 
@@ -467,6 +508,53 @@ router.delete('/group', authenticate, async (req, res) => {
     //delete group
     await deleteGroupchat(groupId);
     res.send("Group deleted");
+});
+
+router.put('/group', authenticate, async (req, res) => {
+    const groupId = req.query.id;
+    const { name, description } = req.body;
+    //check if group exists
+    const groupchat = await getGroupchatByRoomId(groupId);
+    if (!groupchat) {
+        res.status(404).send("Group not found");
+        return;
+    }
+
+    //check if the user is the owner of the group
+    const token = req.headers.authorization;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await getUser(decoded.username);
+    if (!user) {
+        res.status(404).send("User not found");
+        return;
+    }
+
+    if (groupchat.groupchat_creator != user.id) {
+        console.log(groupchat.groupchat_creator + " || " + user.id)
+        res.status(401).send("Unauthorized");
+        return;
+    }
+
+    //regex check the name to alphanumeric
+    const regex = /^[a-zA-Z0-9\s]+$/;
+
+    if (!regex.test(name) || name.length > 20) {
+        res.status(400).send("Group name must be alphanumeric and less than 20 characters");
+        return;
+    }
+
+    if (description.length > 100) {
+        res.status(400).send("Description must be less than 100 characters");
+        return;
+    }
+    console.log("Updating group" + groupId + " " + name + " " + description)
+    //update group
+    await updateGroupchat(groupId, name, description).catch(err => {
+        res.status(500).send("Error updating group" + err.message);
+        return;
+    });
+    
+    res.send("Group updated");
 });
 
 module.exports = router;
