@@ -254,11 +254,12 @@ module.exports = function(io) {
                     else{
                         console.log("Other user not in chat");
                         createMessage(msg.message, null, user.id, room.id, 0);
-                    }
-                    notifications.sendNotificationById(otherUser, {
+                        notifications.sendNotificationById(otherUser, {
                         title: otherUsername.username,
                         body: msg.message
                     });
+                    }
+
                     console.log("Notification sent" + " " + otherUsername.username + " " + msg.message)
                 }
 

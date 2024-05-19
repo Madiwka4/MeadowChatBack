@@ -600,6 +600,7 @@ router.put('/group', authenticate, async (req, res) => {
     res.send("Group updated");
 });
 
+
 router.post('/subscribe', authenticate, async (req, res) => {
     const token = req.headers.authorization;
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -639,6 +640,42 @@ router.post('/subscribe', authenticate, async (req, res) => {
 
     //webpush.sendNotification(testsubscriptionobject, payload).catch(err => console.error(err));
     notifications.sendNotification(testsubscriptionobject, payload);
+});
+
+router.delete('/unsubscribe', authenticate, async (req, res) => {
+    const token = req.headers.authorization;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await getUser(decoded.username);
+    if (!user) {
+        res.status(404).send("User not found");
+        return;
+    }
+
+    const result = await deleteSubscription(user.id);
+    if (!result) {
+        res.status(500).send("Error deleting subscription");
+        return;
+    }
+
+    res.send("Subscription deleted");
+});
+
+router.get('/subscription', authenticate, async (req, res) => {
+    const token = req.headers.authorization;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await getUser(decoded.username);
+    if (!user) {
+        res.status(404).send("User not found");
+        return;
+    }
+
+    const subscription = await getSubscription(user.id);
+    if (!subscription) {
+        res.status(404).send("Subscription not found");
+        return;
+    }
+
+    res.send(subscription);
 });
 
 module.exports = router;
