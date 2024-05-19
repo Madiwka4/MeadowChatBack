@@ -14,6 +14,10 @@ notifications.sendNotification = async (subscription, dataToSend) => {
 
 notifications.sendNotificationById = async (id, dataToSend) => {
     const subscriptionRaw = await getSubscription(id);
+    if (!subscriptionRaw) {
+        console.error('Subscription not found');
+        return;
+    }
     const subscription = JSON.parse(subscriptionRaw.subscription);
     if (subscription) {
         await notifications.sendNotification(subscription, dataToSend);
