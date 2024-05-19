@@ -19,6 +19,7 @@
 const { getUser, getAllRooms, getDms, getDm, createMessage, getRoomById, getDmById, getLastMessageFromRoom, getUserById
     , markRoomAsRead
  } = require('./database');
+ const notifications = require('./push');
 const jwt = require('jsonwebtoken');
 const usersInRooms = {};
 const userSockets = {};
@@ -228,28 +229,41 @@ module.exports = function(io) {
             if (dm) {
                 console.log("DM found: " + JSON.stringify(dm));
                 const otherUser = dm.dm_rec1 === user.id ? dm.dm_rec2 : dm.dm_rec1;
+                const otherUsername = await getUserById(otherUser);
+
                 console.log("Other user: " + otherUser);
                 if (!userSockets[otherUser]) {
                     console.log(userSockets);
                     console.log("Other user not online");
                     createMessage(msg.message, null, user.id, room.id, 1);
+                    notifications.sendNotificationById(otherUser, {
+                        title: otherUsername.username,
+                        body: msg.message
+                    });
+                    console.log("Notification sent" + " " + otherUsername.username + " " + msg.message)
                 }
                 else{
                     console.log("Other user online");
                     room.last_message = msg;
                     io.to(userSockets[otherUser]).emit("chat notiff", room);
-                    createMessage(msg.message, null, user.id, room.id, 2);
+                    if (usersInRooms[roomId] && usersInRooms[roomId].length > 1) {
+                        console.log("Other user in chat");
+                        msg.status = 2;
+                        createMessage(msg.message, null, user.id, room.id, 2);
+                    }
+                    else{
+                        console.log("Other user not in chat");
+                        createMessage(msg.message, null, user.id, room.id, 0);
+                    }
+                    notifications.sendNotificationById(otherUser, {
+                        title: otherUsername.username,
+                        body: msg.message
+                    });
+                    console.log("Notification sent" + " " + otherUsername.username + " " + msg.message)
                 }
 
                 //check if other user is in the chat
-                if (usersInRooms[roomId] && usersInRooms[roomId].length > 1) {
-                    console.log("Other user in chat");
-                    msg.status = 2;
-                }
-                else{
-                    console.log("Other user not in chat");
-                    createMessage(msg.message, null, user.id, room.id, 0);
-                }
+
             }
             else{
                 createMessage(msg.message, null, user.id, room.id, 0);

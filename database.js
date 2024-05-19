@@ -134,7 +134,29 @@ const initDb = async () => {
             );
         `);
     }
+
+    //check if the subscription table exists, if not, create it
+    const subscriptionsTableExists = await pool.query(`
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables
+            WHERE table_schema = 'public'
+            AND table_name = 'subscriptions'
+        );
+    `);
+
+    if (!subscriptionsTableExists.rows[0].exists) {
+        console.log("Table subscriptions does not exist, creating it...");
+        await pool.query(`
+            CREATE TABLE subscriptions (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) UNIQUE,
+                subscription_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                subscription TEXT
+            );
+        `);
+    }
     
+
 
     //check if "users" table is empty, if so, create a default user
     const users = await pool.query('SELECT * FROM users');
@@ -690,6 +712,48 @@ const updateGroupchat = async (groupchat_id, groupchat_name, groupchat_descripti
 
 // GROUPCHAT FUNCTIONS END
 
+// SUBSCRIPTION FUNCTIONS
+
+const createSubscription = async (user_id, subscription) => {
+    const query = {
+        text: 'INSERT INTO subscriptions(user_id, subscription) VALUES($1, $2) ON CONFLICT (user_id) DO UPDATE SET subscription = EXCLUDED.subscription, subscription_date = CURRENT_TIMESTAMP',
+        values: [user_id, subscription],
+    };
+
+    const result = await pool
+        .query(query)
+        .catch(err => console.error(err));
+
+    return result;
+}
+
+const getSubscription = async (user_id) => {
+    const query = {
+        text: 'SELECT * FROM subscriptions WHERE user_id = $1 ORDER BY subscription_date DESC LIMIT 1',
+        values: [user_id],
+    };
+
+    const result = await pool
+        .query(query)
+        .catch(err => console.error(err));
+    console.log("SUBSCRIPTION: " + JSON.stringify(result.rows[0]));
+    return result.rows[0];
+}
+
+const deleteSubscription = async (user_id) => {
+    const query = {
+        text: 'DELETE FROM subscriptions WHERE user_id = $1',
+        values: [user_id],
+    };
+
+    const result = await pool
+        .query(query)
+        .catch(err => console.error(err));
+console.log("DELETED SUBSCRIPTION: " + JSON.stringify(result));
+    return result;
+}
+
+
 
 module.exports = {
     createUser,
@@ -727,5 +791,8 @@ module.exports = {
     getGroupchatsByUser,
     getMemberCount,
     getGroupchatByRoomId,
-    updateGroupchat
+    updateGroupchat,
+    createSubscription,
+    getSubscription,
+    deleteSubscription,
 };

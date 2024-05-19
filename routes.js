@@ -13,10 +13,14 @@ const { getUser, getAllUsers, createUser, getRoom, createDm, createRoom, getDm, 
     getMemberCount,
     updateGroupchat,
     getRoomsFromGroupchat,
+    createSubscription,
+    getSubscription,
+    deleteSubscription,
 getUserById, getLastMessageFromRoom, getMessageNumberFromRoom,
  } = require('./database');
 const router = express.Router();
 const jwt = require ('jsonwebtoken');
+const notifications = require('./push.js');
 const bcrypt = require('bcrypt');
 const { authenticate } = require('./middleware');
 
@@ -176,19 +180,58 @@ router.get('/dm', authenticate, async (req, res) => {
         return;
     }
     const dms = await getDms(user.id);
-    dms.rooms = await Promise.all(dms.rooms.map(async (room) => {
-        room.last_message = await getLastMessageFromRoom(room.id);
-        if (!room.last_message) {
-            room.last_message = {
-                message: "No messages",
-                author: "System",
-                id: 0
+    console.log("getting dms: " + JSON.stringify(dms));
+    const rooms = dms.rooms;
+    const mapIdToRoomKey = {};
+    Object.keys(rooms).forEach(key => {
+        let room = rooms[key];
+        mapIdToRoomKey[room.id] = key;
+    });
+    console.log("Map: " + JSON.stringify(mapIdToRoomKey));
+    const dmObjects = dms.dms
+    console.log("DMs: " + JSON.stringify(dmObjects)
+    );
+    console.log("Rooms: " + JSON.stringify(rooms));
+    //check if each DM has the other user online
+    Promise.all(dmObjects.map(async(dm) => {
+        const otherUser = dm.dm_rec1 === user.id ? dm.dm_rec2 : dm.dm_rec1;
+        rooms[mapIdToRoomKey[dm.associated_room]].other_user = otherUser;
+        const lastmsg= await getLastMessageFromRoom(dm.associated_room);
+        if (lastmsg){
+            const xuser = await getUserById(lastmsg.message_author);
+            const xdate = new Date(lastmsg.message_sent)
+            const xidstamp = xdate.getTime();
+            
+            const lastMessage = {
+                message: lastmsg.message_text,
+                id: xidstamp,
+                author: xuser.username
+            }
+            console.log("Last message: " + JSON.stringify(lastmsg));
+            rooms[mapIdToRoomKey[dm.associated_room]].last_message = lastMessage;
+
+            if (lastmsg.message_socket_id == 1 && lastmsg.message_author != user.id){
+                rooms[mapIdToRoomKey[dm.associated_room]].unread = true;
+            }
+            else{
+                rooms[mapIdToRoomKey[dm.associated_room]].unread = false;
             }
         }
-        return room;
-    }));
-    console.log("Sent DM using get /dm: " + JSON.stringify(dms));
-    res.send(dms);
+        else{
+            rooms[mapIdToRoomKey[dm.associated_room]].last_message = {
+                message: "No messages",
+                id: 0,
+                authro: "System",
+            }
+        }
+        //map the lastMessage to the format (message, id, author)
+        
+        
+    })).then(() => {
+        console.log("sending dms: " + JSON.stringify(rooms));
+        res.send(rooms);
+    });
+    console.log("Sent DM using get /dm: " + JSON.stringify(rooms));
 });
 
 router.get('/dm/:id', authenticate, async (req, res) => {
@@ -555,6 +598,47 @@ router.put('/group', authenticate, async (req, res) => {
     });
     
     res.send("Group updated");
+});
+
+router.post('/subscribe', authenticate, async (req, res) => {
+    const token = req.headers.authorization;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await getUser(decoded.username);
+    if (!user) {
+        res.status(404).send("User not found");
+        return;
+    }
+    const subscription = req.body;
+
+    //check if subscription already exists
+    const sub = await getSubscription(user.id);
+    if (sub) {
+        console.log("Subscription already exists")
+        const deleted = await deleteSubscription(user.id);
+        if (!deleted) {
+            res.status(500).send("Error replacing subcription");
+            return;
+        }
+        console.log("Deleted subscription")
+    }
+
+    const result = await createSubscription(user.id, subscription);
+    if (!result) {
+        res.status(500).send("Error creating subscription");
+        return;
+    }
+
+    res.status(201).json({});
+    const payload = JSON.stringify({ title: 'Notification Test', body: 'If you can see this, they work!'});
+
+    console.log(subscription);
+
+    const test = await getSubscription(user.id);
+    const testsubscriptionobject = JSON.parse(test.subscription);
+    console.log("Subscription: " + JSON.stringify(test));
+
+    //webpush.sendNotification(testsubscriptionobject, payload).catch(err => console.error(err));
+    notifications.sendNotification(testsubscriptionobject, payload);
 });
 
 module.exports = router;

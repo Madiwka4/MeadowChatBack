@@ -5,13 +5,14 @@ const http = require('http').createServer(app);
 const io = require('socket.io')(http, {
   cors: {
     origin: "http://localhost:5173", // Replace with your actual domain in production
-    methods: ["GET", "POST"]
+    methods: ["GET", "POST", "PUT", "DELETE"]
   }
 });
 const { join } = require('path');
 const cors = require('cors'); // Install 'cors' module if you haven't
 app.use(express.json());
 app.use(cors());
+
 
 
 
